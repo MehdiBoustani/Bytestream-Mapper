@@ -34,12 +34,17 @@ struct INode_t
 
 struct magic {
     INode *root;
+    int operationCount;
 };
 
 /* Prototypes of static functions */
 static INode *newINode(int low, int high, int offset);
-static void leftRotate(MAGIC m, INode *rotNode);
-static void rightRotate(MAGIC m, INode *rotNode);
+static void destroyTree(INode *root);
+static void updateMaxEnd(INode *node);
+static void leftRotate(MAGIC m, INode *x);
+static void rightRotate(MAGIC m, INode *x);
+static void fixup(MAGIC m, INode *z);
+static void rbInsert(MAGIC m, INode *z);
 
 
 /* Static Functions */
@@ -71,54 +76,230 @@ static INode *newINode(int low, int high, int offset) {
     return n;
 }
 
+/**
+ * @brief Recursively destroy a tree
+ *
+ * @param root Root node of tree/subtree
+ */
+static void destroyTree(INode *root) {
+    if (root == NULL) {
+        return;
+    }
+    
+    // Destroy left and right subtrees
+    destroyTree(root->left);
+    destroyTree(root->right);
+    
+    // Free the node
+    free(root);
+}
+
+/**
+ * @brief Updates the maxEnd value of a node
+ *
+ * @param node The node to update
+ */
+static void updateMaxEnd(INode *node) {
+    if (node == NULL) return;
+    
+    node->maxEnd = node->high;
+    
+    if (node->left != NULL && node->left->maxEnd > node->maxEnd) {
+        node->maxEnd = node->left->maxEnd;
+    }
+    
+    if (node->right != NULL && node->right->maxEnd > node->maxEnd) {
+        node->maxEnd = node->right->maxEnd;
+    }
+}
+
 // A REVOIR !!!!!!!!!!!!!!
 
 /**
  * @brief Performs a left rotation at a given node
- * 
- * @param magic Pointer to the MAGIC instance
- * @param rotNode The node to rotate around
+ *
+ * @param m Pointer to the MAGIC instance
+ * @param x The node to rotate around
  */
-static void leftRotate(MAGIC m, INode *rotNode){
-    if (m == NULL || rotNode == NULL || rotNode->right == NULL)  {
-        printf("leftRotate: NULL Error\n");
+static void leftRotate(MAGIC m, INode *x) {
+    if (m == NULL || x == NULL || x->right == NULL) {
         return;
     }
-
-    INode *n = rotNode->right; // pick the right node 
-
-    // Turn n's left subtree into rotNode's right subtree
-    rotNode->right = n->left;
-    if (n->left != NULL) {
-        n->left->parent = rotNode;
+    
+    INode *y = x->right;  // Set y
+    
+    // Turn y's left subtree into x's right subtree
+    x->right = y->left;
+    if (y->left != NULL) {
+        y->left->parent = x;
     }
-
-    n->parent = rotNode->parent;
-    if (rotNode->parent == NULL) {
-        // node was the root
-        m->root = n; 
-    } else if (rotNode = rotNode->parent->left) {
-        n->parent->left = n;
+    
+    // Link x's parent to y
+    y->parent = x->parent;
+    if (x->parent == NULL) {
+        m->root = y;
+    } else if (x == x->parent->left) {
+        x->parent->left = y;
     } else {
-        rotNode->parent->right = n;
+        x->parent->right = y;
     }
+    
+    // x on y's left
+    y->left = x;
+    x->parent = y;
+    
+    // Update maxEnd values for both nodes
+    updateMaxEnd(x);
+    updateMaxEnd(y);
+}
 
-    n->left = rotNode;
-    rotNode->parent = n;
-
-    // Update maxEnd
-    n->maxEnd = n->high;
-    if (n->left != NULL && n->left->maxEnd > n->maxEnd) {
-        n->maxEnd = n->left->maxEnd;
+/**
+ * @brief Performs a right rotation at a given node
+ *
+ * @param m Pointer to the MAGIC instance
+ * @param y The node to rotate around
+ */
+static void rightRotate(MAGIC m, INode *y) {
+    if (m == NULL || y == NULL || y->left == NULL) {
+        return;
     }
-    if (n->right != NULL && n->right->maxEnd > n->maxEnd) {
-        n->maxEnd = n->right->maxEnd;
+    
+    INode *x = y->left;  // Set x
+    
+    // Turn x's right subtree into y's left subtree
+    y->left = x->right;
+    if (x->right != NULL) {
+        x->right->parent = y;
+    }
+    
+    // Link y's parent to x
+    x->parent = y->parent;
+    if (y->parent == NULL) {
+        m->root = x;
+    } else if (y == y->parent->left) {
+        y->parent->left = x;
+    } else {
+        y->parent->right = x;
+    }
+    
+    // y on x's right
+    x->right = y;
+    y->parent = x;
+    
+    // Update maxEnd values for both nodes
+    updateMaxEnd(y);
+    updateMaxEnd(x);
+}
+
+/**
+ * @brief Performs rotations and recoloring to maintain red-black properties after inserting a new node
+ *
+ * @param m Pointer to the MAGIC instance
+ * @param z The newly inserted node
+ */
+static void fixup(MAGIC m, INode *z) {
+    if (z == NULL)
+        return;
+    while (z != m->root && z->parent != NULL && z->parent->color == RED) {
+        if (z->parent == z->parent->parent->left) { 
+            // parent is a left child of grand-parent 
+
+            INode *y = z->parent->parent->right; // uncle of z
+
+            if (y != NULL && y->color == RED) {
+                // Case 1: RB property violated (uncle is red) -> Recolor
+                z->parent->color = BLACK;       // parent BLACK
+                y->color = BLACK;               // uncle BLACK 
+                z->parent->parent->color = RED; 
+                z = z->parent->parent;        
+            } else { 
+                if (z == z->parent->right) {
+                    // Case 2: z is a right child and Uncle is BLACK -> rotate left
+                    z = z->parent;
+                    leftRotate(m, z);
+                }
+    
+                if (z->parent != NULL && z->parent->parent != NULL) {
+                    // Case 3: z is a left child and Uncle is BLACK -> Recolor and rotate right
+                    z->parent->color = BLACK;
+                    z->parent->parent->color = RED;
+                    rightRotate(m, z->parent->parent);
+                }
+            } 
+
+        } else {
+            // Parent is a right child of grand-parent
+            INode *y = z->parent->parent->left; // uncle of z
+
+            if (y != NULL && y->color == RED) {
+                // Case 1: RB property violated (Uncle is red) -> Recolor
+                z->parent->color = BLACK;       // parent BLACK
+                y->color = BLACK;               // uncle BLACK 
+                z->parent->parent->color = RED; 
+                z = z->parent->parent;        
+            } else { 
+                if (z == z->parent->left) {
+                    // Case 2: z is a left child and Uncle is BLACK -> rotate right
+                    z = z->parent;
+                    rightRotate(m, z);
+                }
+    
+                if (z->parent != NULL && z->parent->parent != NULL) {
+                    // Case 3: z is a left child and Uncle is BLACK -> Recolor and rotate left
+                    z->parent->color = BLACK;
+                    z->parent->parent->color = RED;
+                    leftRotate(m, z->parent->parent);
+                }
+            } 
+        }
     }
 }
 
-static void rightRotate(MAGIC magic, INode *rotNode){
-    // TODO
+/**
+ * @brief Insert a node into the interval tree (Red-Black approach)
+ *
+ * @param m Pointer to the MAGIC instance
+ * @param z The new node
+ */
+static void rbInsert(MAGIC m, INode *z) {
+    INode *y = NULL;
+    INode *x = m->root;
+
+    while (x != NULL) { // traverse
+        y = x; 
+
+        // Update max end with the new node
+        if (z->high > x->maxEnd) {
+            x->maxEnd = z->high;
+        }   
+
+        // Traverse tree according to BST property 
+        // (left: Less than, right: Greater or equal)
+        if (z->low < x->low) {
+            // new node ha
+            x = x->left;
+        } else {
+            x = x->right;
+        }
+    }
+
+    // Set y as parent of new node
+    z->parent = y;
+
+    // Place x according to BST children property
+    // (left: less than, right: Greater or equal)
+    if (y == NULL) { // tree is empty
+        m->root = z;
+    } else if (z->low < y->low) {
+        y->left = z;
+    } else {
+        y->right = z;
+    }
+    
+    // Recolor and/or rotate if necessary to maintain balance
+    fixup(m, z);
 }
+
 
 /* Implementation of API */
 
@@ -130,6 +311,7 @@ MAGIC MAGICinit() {
     }
 
     m->root = NULL;
+    m->operationCount = 0;
     return m;
 }
 
@@ -146,5 +328,13 @@ int MAGICmap(MAGIC m, MAGICDirection direction, int pos){
 }
 
 void MAGICdestroy(MAGIC m){
-    // TODO
+    if (m == NULL) {
+        return;
+    }
+    
+    // Destroy the tree
+    destroyTree(m->root);
+    
+    // Free MAGIC 
+    free(m);
 }
