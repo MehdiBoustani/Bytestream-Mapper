@@ -24,27 +24,28 @@ typedef enum {RED, BLACK} Color;
 
 struct INode_t
 {
-    int low;     // lower boundary of the interval
-    int high;    // high boundary of the interval 
+    int low;     // lower boundary of the interval (pos)
+    int high;    // high boundary of the interval (pos + length)
     int maxEnd;  // max endpoint in the subtree
-    int offset;  // A VOIR SI ON GARDE
+    int opType;  // 1 for add, -1 for remove
     Color color; 
     INode *left, *right, *parent;
 };
 
 struct magic {
     INode *root;
-    int operationCount;
+    size_t size; // store number of nodes (!!!! NOT size of bytestream)
 };
 
 /* Prototypes of static functions */
-static INode *newINode(int low, int high, int offset);
+static INode *newINode(int low, int high);
 static void destroyTree(INode *root);
 static void updateMaxEnd(INode *node);
 static void leftRotate(MAGIC m, INode *x);
 static void rightRotate(MAGIC m, INode *x);
 static void fixup(MAGIC m, INode *z);
 static void rbInsert(MAGIC m, INode *z);
+static int getStreamSize(MAGIC m);
 
 
 /* Static Functions */
@@ -57,7 +58,7 @@ static void rbInsert(MAGIC m, INode *z);
  * 
  * @return INode* a pointer to the new created Interval Node
  */
-static INode *newINode(int low, int high, int offset) {
+static INode *newINode(int low, int high) {
     INode *n = malloc(sizeof(INode));
     if (n == NULL) {
         printf("newINode: Allocation error\n");
@@ -67,7 +68,6 @@ static INode *newINode(int low, int high, int offset) {
     n->low  = low;
     n->high = high;
     n->maxEnd = high;
-    n->offset = offset;
     n->color = RED; // by default
     n->parent = NULL;
     n->left   = NULL;
@@ -191,6 +191,7 @@ static void rightRotate(MAGIC m, INode *y) {
     updateMaxEnd(x);
 }
 
+
 /**
  * @brief Performs rotations and recoloring to maintain red-black properties after inserting a new node
  *
@@ -255,6 +256,8 @@ static void fixup(MAGIC m, INode *z) {
     }
 }
 
+
+// A AJUSTER !!!!
 /**
  * @brief Insert a node into the interval tree (Red-Black approach)
  *
@@ -311,12 +314,23 @@ MAGIC MAGICinit() {
     }
 
     m->root = NULL;
-    m->operationCount = 0;
+    m->size = 0;
     return m;
 }
 
+
+// A REFAIRE !!!
 void MAGICadd(MAGIC m, int pos, int length){
-    // TODO
+    if (m == NULL || length <= 0)
+        return;
+
+    INode *newNode = newINode(pos, pos + 1, length);
+    if (newNode == NULL)
+        return;
+
+    rbInsert(m, newNode);
+
+    m->size++;
 }
 
 void MAGICremove(MAGIC m, int pos, int length){
