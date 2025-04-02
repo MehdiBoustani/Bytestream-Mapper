@@ -28,6 +28,7 @@ struct INode_t
     int high;    // high boundary of the interval (pos + length)
     int maxEnd;  // max endpoint in the subtree
     int opType;  // 1 for add, -1 for remove
+    int offset;  // offset of the interval
     Color color; 
     INode *left, *right, *parent;
 };
@@ -38,7 +39,7 @@ struct magic {
 };
 
 /* Prototypes of static functions */
-static INode *newINode(int low, int high);
+static INode *createNode(int low, int high);
 static void destroyTree(INode *root);
 static void updateMaxEnd(INode *node);
 static void leftRotate(MAGIC m, INode *x);
@@ -58,10 +59,10 @@ static int getStreamSize(MAGIC m);
  * 
  * @return INode* a pointer to the new created Interval Node
  */
-static INode *newINode(int low, int high) {
+static INode *createNode(int low, int high) {
     INode *n = malloc(sizeof(INode));
     if (n == NULL) {
-        printf("newINode: Allocation error\n");
+        printf("createNode: Allocation error\n");
         return NULL;
     }
 
@@ -72,7 +73,7 @@ static INode *newINode(int low, int high) {
     n->parent = NULL;
     n->left   = NULL;
     n->right  = NULL;
-
+    n->offset = 0;
     return n;
 }
 
@@ -201,6 +202,7 @@ static void rightRotate(MAGIC m, INode *y) {
 static void fixup(MAGIC m, INode *z) {
     if (z == NULL)
         return;
+
     while (z != m->root && z->parent != NULL && z->parent->color == RED) {
         if (z->parent == z->parent->parent->left) { 
             // parent is a left child of grand-parent 
@@ -318,6 +320,82 @@ static void rbInsert(MAGIC m, INode *z) {
     }
 }
 
+static int computeOffset(MAGIC m, int pos) {
+
+    if(m == NULL || m->root == NULL) return 0;
+
+    INode *current = m->root;
+
+    int offset = 0;
+
+    int currIntervalSize = 0;
+
+    while(current != NULL){
+        if(pos < current->low){
+            current = current->left;
+        }
+        else{
+            currIntervalSize = current->high - current->low;
+
+            if(current->opType == -1){
+                offset -= currIntervalSize;
+            }
+            else if(current->opType == 1){
+                offset += currIntervalSize;
+            }
+
+            current = current->right;
+        }
+    }
+
+    return offset;
+}
+
+
+// THIS IS JUST A BRUTE ALGO, TO UPDATE LATER
+static void handleOverlap(MAGIC m, INode *newNode){
+    assert(m != NULL && m->root != NULL && newNode);
+
+    INode *current = m->root;
+    INode *overlapping = NULL;
+
+    while(current != NULL){
+        // Check if overlapping is present
+        if(newNode->low <= current->high && newNode->high >= current->low){
+            overlapping = current;
+
+            // We found an overlapping, we can quit the search
+            break;
+        }
+
+        //Continue the search
+        if(newNode->low < current->low){
+            current = current->left;
+        }
+        else{
+            current = current->right;
+        }
+    }
+    // If there is no overlapping, we insert the new node normally
+    if(!overlapping){
+        rbInsert(m, newNode);
+        return;
+    }
+
+    // ----------------------- CASES OF OVERLAPPING -----------------------
+
+    // 1) Subsumed (the interval is just included in another, we merge them)
+    if(newNode->low >= overlapping->low && newNode->high <= overlapping->high){
+        overlapping->offset += newNode->offset;
+        free(newNode);
+        return;
+    }
+
+    // 2) Partial overlap (the interval is partially included in another, we split them in 3)
+    
+}
+    
+
 
 /* Implementation of API */
 
@@ -338,11 +416,13 @@ void MAGICadd(MAGIC m, int pos, int length){
     if (m == NULL || length <= 0)
         return;
 
-    INode *newNode = newINode(pos, pos + length);
+    INode *newNode = createNode(pos, pos + length);
     if (newNode == NULL)
         return;
 
     newNode->opType = 1; // 1 for add
+
+    newNode->offset = computeOffset(m, pos);
     
     rbInsert(m, newNode);
 
@@ -350,11 +430,65 @@ void MAGICadd(MAGIC m, int pos, int length){
 }
 
 void MAGICremove(MAGIC m, int pos, int length){
-    // TODO
+    if (m == NULL || length <= 0)
+        return;
+
+    INode *newNode = createNode(pos, pos + length);
+    if (newNode == NULL)
+        return;
+
+    newNode->opType = -1; // -1 for remove
+
+    newNode->offset = computeOffset(m, pos);
+
+    rbInsert(m, newNode);
+
+    m->size++;
 }
 
 int MAGICmap(MAGIC m, MAGICDirection direction, int pos){
-    // TODO
+    assert(m != NULL && (direction == STREAM_IN_OUT || direction == STREAM_OUT_IN));
+
+    INode *current = m->root;
+
+    int offset = 0;
+
+    int currIntervalSize = 0;
+
+    while(current != NULL){
+        if(current->low <= pos && current->high > pos){
+            // If we want to get an interval removed from IN to OUT, it doesn't exist in OUT stream
+            // Or, if we want to get one added from OUT to INT, it doesn't exist in IN stream
+            if((direction == STREAM_IN_OUT && current->opType == -1) ||
+            (direction == STREAM_OUT_IN && current->opType == 1) ){
+                return -1;
+            }
+            // Else: Continue to search
+        }
+
+        if(pos < current->low){
+            current = current->left;
+        }
+        else{
+            currIntervalSize = current->high - current->low;
+
+            // If the interval is removed and we go from IN to OUT, we substract the interval size
+            // If the interval is removed and we go from OUT to IN, we add the interval size
+            if(current->opType == -1){
+                offset += (direction == STREAM_IN_OUT ? -1 : 1) * currIntervalSize;
+            }
+            // If the interval is added and we go from OUT to IN, we add the interval size
+            // If the interval is added and we go from IN to OUT, we substract the interval size
+            else if(current->opType == 1){
+                offset += (direction == STREAM_IN_OUT ? 1 : -1) * currIntervalSize;
+            }
+
+            current = current->right;
+        }
+    }
+
+    return pos + offset;
+    
 }
 
 void MAGICdestroy(MAGIC m){
