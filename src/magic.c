@@ -256,8 +256,6 @@ static void fixup(MAGIC m, INode *z) {
     }
 }
 
-
-// A AJUSTER !!!!
 /**
  * @brief Insert a node into the interval tree (Red-Black approach)
  *
@@ -279,9 +277,10 @@ static void rbInsert(MAGIC m, INode *z) {
         // Traverse tree according to BST property 
         // (left: Less than, right: Greater or equal)
         if (z->low < x->low) {
-            // new node ha
+            // new node is less than current node
             x = x->left;
         } else {
+            // new node is greater than or equal to current node
             x = x->right;
         }
     }
@@ -301,6 +300,22 @@ static void rbInsert(MAGIC m, INode *z) {
     
     // Recolor and/or rotate if necessary to maintain balance
     fixup(m, z);
+
+    // Update maxEnd values for all ancestors of the new node
+    while(y != NULL) {
+        int maxEnd = y->high;
+
+        if (y->left != NULL && y->left->maxEnd > maxEnd) {
+            maxEnd = y->left->maxEnd;
+        }
+
+        if (y->right != NULL && y->right->maxEnd > maxEnd) {
+            maxEnd = y->right->maxEnd;
+        }
+
+        y->maxEnd = maxEnd;
+        y = y->parent;
+    }
 }
 
 
@@ -315,19 +330,20 @@ MAGIC MAGICinit() {
 
     m->root = NULL;
     m->size = 0;
+
     return m;
 }
 
-
-// A REFAIRE !!!
 void MAGICadd(MAGIC m, int pos, int length){
     if (m == NULL || length <= 0)
         return;
 
-    INode *newNode = newINode(pos, pos + 1, length);
+    INode *newNode = newINode(pos, pos + length);
     if (newNode == NULL)
         return;
 
+    newNode->opType = 1; // 1 for add
+    
     rbInsert(m, newNode);
 
     m->size++;
