@@ -74,6 +74,7 @@ static INode *createNode(int low, int high) {
     n->left   = NULL;
     n->right  = NULL;
     n->offset = 0;
+    n->opType = 0;
     return n;
 }
 
@@ -392,7 +393,66 @@ static void handleOverlap(MAGIC m, INode *newNode){
     }
 
     // 2) Partial overlap (the interval is partially included in another, we split them in 3)
+    if (newNode->low < overlapping->low || newNode->high > overlapping->high) {
+
+        if(newNode->low < overlapping->low){
+            INode *leftNode = createNode(newNode->low, overlapping->low - 1);
+            leftNode->opType = newNode->opType;
+            leftNode->offset = newNode->offset;
+            rbInsert(m, leftNode);
+        }
+
+        if(newNode->high > overlapping->high){
+            INode *rightNode = createNode(overlapping->high + 1, newNode->high);
+            rightNode->opType = newNode->opType;
+            rightNode->offset = newNode->offset;
+            rbInsert(m, rightNode);
+        }
+
+        overlapping->offset += newNode->offset;
+
+        free(newNode);
+        
+        return;
+    }
+
+    // 3) Union of 2 intervals
+    INode *next = nextInterval(m, overlapping);
+    if(next != NULL && newNode->high >= next->low){
+        overlapping->high = (newNode->high > next->high) ? newNode->high : next->high;
+        overlapping->offset += newNode->offset + next->offset;
+        
+        rbRemove(m, next);
+        free(next);
+        free(newNode);
+
+        return;
+    }
+
+}
+
+static INode *nextInterval(MAGIC m, INode *node){
+    assert(m != NULL && node != NULL);
+
+    // If there is a right child, we store the lowest element of it
+    if(node->right != NULL){
+        INode *current = node->right;
+        while(current->left != NULL){
+            current = current->left;
+        }
+        return current;
+    }
+
+
+    // Else: get the first ancestor of left child
+    while(node->parent != NULL){
+        if(node == node->parent->left){
+            return node->parent;
+        }
+        node = node->parent;
+    }
     
+    return NULL;
 }
     
 
@@ -424,7 +484,7 @@ void MAGICadd(MAGIC m, int pos, int length){
 
     newNode->offset = computeOffset(m, pos);
     
-    rbInsert(m, newNode);
+    handleOverlap(m, newNode);
 
     m->size++;
 }
@@ -441,7 +501,7 @@ void MAGICremove(MAGIC m, int pos, int length){
 
     newNode->offset = computeOffset(m, pos);
 
-    rbInsert(m, newNode);
+    handleOverlap(m, newNode);
 
     m->size++;
 }
