@@ -24,18 +24,18 @@ typedef enum {RED, BLACK} Color;
 
 struct INode_t
 {
-    int low;     // lower boundary of the interval (pos)
-    int high;    // high boundary of the interval (pos + length)
-    int maxEnd;  // max endpoint in the subtree
+    unsigned int low;     // lower boundary of the interval (pos)
+    unsigned int high;    // high boundary of the interval (pos + length)
+    unsigned int maxEnd;  // max endpoint in the subtree
+    unsigned int seqNumber;
     int opType;  // 1 for add, -1 for remove
-    int offset;  // offset of the interval
     Color color; 
     INode *left, *right, *parent;
 };
 
 struct magic {
     INode *root;
-    size_t size; // store number of nodes (!!!! NOT size of bytestream)
+    size_t size; // store number of nodes (operations)
 };
 
 /* Prototypes of static functions */
@@ -46,7 +46,10 @@ static void leftRotate(MAGIC m, INode *x);
 static void rightRotate(MAGIC m, INode *x);
 static void fixup(MAGIC m, INode *z);
 static void rbInsert(MAGIC m, INode *z);
-static int getStreamSize(MAGIC m);
+static void traverse(INode *node, int pos, INode **operations, int *count, int maxOperations);
+static int collectRelevantOperations(MAGIC m, int pos, INode **operations, int maxOperations);
+static int inOutMap(INode **operations, int opCount, int pos);
+static int outInMap(INode **operations, int opCount, int pos);
 
 
 /* Static Functions */
@@ -55,11 +58,15 @@ static int getStreamSize(MAGIC m);
  * @brief Create a new Interval Tree node with a given range.
  *
  * @param low low value of the interval
- * @param high high value of the interval
+ * @param high high value of the interval 
  * 
  * @return INode* a pointer to the new created Interval Node
  */
 static INode *createNode(int low, int high) {
+    if (low < 0 || high < 0) {
+        printf("Out of boundaries\n");
+        return NULL;
+    }
     INode *n = malloc(sizeof(INode));
     if (n == NULL) {
         printf("createNode: Allocation error\n");
@@ -73,8 +80,7 @@ static INode *createNode(int low, int high) {
     n->parent = NULL;
     n->left   = NULL;
     n->right  = NULL;
-    n->offset = 0;
-    n->opType = 0;
+    n->opType = 0; 
     return n;
 }
 
@@ -193,70 +199,64 @@ static void rightRotate(MAGIC m, INode *y) {
     updateMaxEnd(x);
 }
 
-
 /**
  * @brief Performs rotations and recoloring to maintain red-black properties after inserting a new node
  *
  * @param m Pointer to the MAGIC instance
- * @param z The newly inserted node
+ * @param z The newly inserted node (non-NULL)
  */
 static void fixup(MAGIC m, INode *z) {
-    if (z == NULL)
-        return;
+    if (m == NULL || z == NULL) return;
 
     while (z != m->root && z->parent != NULL && z->parent->color == RED) {
-        if (z->parent == z->parent->parent->left) { 
-            // parent is a left child of grand-parent 
+        if (z->parent == z->parent->parent->left) {
+            // Case: Parent is a left child of grandparent
+            INode *uncle = z->parent->parent->right;
 
-            INode *y = z->parent->parent->right; // uncle of z
-
-            if (y != NULL && y->color == RED) {
-                // Case 1: RB property violated (uncle is red) -> Recolor
-                z->parent->color = BLACK;       // parent BLACK
-                y->color = BLACK;               // uncle BLACK 
-                z->parent->parent->color = RED; 
-                z = z->parent->parent;        
-            } else { 
+            if (uncle != NULL && uncle->color == RED) {
+                // Case 1: Uncle is RED -> Recolor
+                z->parent->color = BLACK;
+                uncle->color = BLACK;
+                z->parent->parent->color = RED;
+                z = z->parent->parent; // Move up to grandparent
+            } else {
+                // Case 2: Uncle is BLACK (or NULL) -> Rotate
                 if (z == z->parent->right) {
-                    // Case 2: z is a right child and Uncle is BLACK -> rotate left
+                    // Case 2a: z is a right child -> Left-rotate parent
                     z = z->parent;
                     leftRotate(m, z);
                 }
-    
-                if (z->parent != NULL && z->parent->parent != NULL) {
-                    // Case 3: z is a left child and Uncle is BLACK -> Recolor and rotate right
-                    z->parent->color = BLACK;
-                    z->parent->parent->color = RED;
-                    rightRotate(m, z->parent->parent);
-                }
-            } 
-
+                // Case 3: Recolor and right-rotate grandparent
+                z->parent->color = BLACK;
+                z->parent->parent->color = RED;
+                rightRotate(m, z->parent->parent);
+            }
         } else {
-            // Parent is a right child of grand-parent
-            INode *y = z->parent->parent->left; // uncle of z
+            // Symmetric case: Parent is a right child of grandparent
+            INode *uncle = z->parent->parent->left;
 
-            if (y != NULL && y->color == RED) {
-                // Case 1: RB property violated (Uncle is red) -> Recolor
-                z->parent->color = BLACK;       // parent BLACK
-                y->color = BLACK;               // uncle BLACK 
-                z->parent->parent->color = RED; 
-                z = z->parent->parent;        
-            } else { 
+            if (uncle != NULL && uncle->color == RED) {
+                // Case 1: Uncle is RED -> Recolor
+                z->parent->color = BLACK;
+                uncle->color = BLACK;
+                z->parent->parent->color = RED;
+                z = z->parent->parent; // Move up to grandparent
+            } else {
+                // Case 2: Uncle is BLACK (or NULL) -> Rotate
                 if (z == z->parent->left) {
-                    // Case 2: z is a left child and Uncle is BLACK -> rotate right
+                    // Case 2a: z is a left child -> Right-rotate parent
                     z = z->parent;
                     rightRotate(m, z);
                 }
-    
-                if (z->parent != NULL && z->parent->parent != NULL) {
-                    // Case 3: z is a left child and Uncle is BLACK -> Recolor and rotate left
-                    z->parent->color = BLACK;
-                    z->parent->parent->color = RED;
-                    leftRotate(m, z->parent->parent);
-                }
-            } 
+                // Case 3: Recolor and left-rotate grandparent
+                z->parent->color = BLACK;
+                z->parent->parent->color = RED;
+                leftRotate(m, z->parent->parent);
+            }
         }
     }
+    // Ensure root is always black
+    m->root->color = BLACK;
 }
 
 /**
@@ -266,6 +266,8 @@ static void fixup(MAGIC m, INode *z) {
  * @param z The new node
  */
 static void rbInsert(MAGIC m, INode *z) {
+    if (m == NULL || z == NULL) return;
+
     INode *y = NULL;
     INode *x = m->root;
 
@@ -301,161 +303,111 @@ static void rbInsert(MAGIC m, INode *z) {
         y->right = z;
     }
     
-    // Recolor and/or rotate if necessary to maintain balance
+    // Fix Red-Black properties: Recolor and/or rotate if necessary to maintain balance
     fixup(m, z);
-
-    // Update maxEnd values for all ancestors of the new node
-    while(y != NULL) {
-        int maxEnd = y->high;
-
-        if (y->left != NULL && y->left->maxEnd > maxEnd) {
-            maxEnd = y->left->maxEnd;
-        }
-
-        if (y->right != NULL && y->right->maxEnd > maxEnd) {
-            maxEnd = y->right->maxEnd;
-        }
-
-        y->maxEnd = maxEnd;
-        y = y->parent;
-    }
 }
 
-static int computeOffset(MAGIC m, int pos) {
-
-    if(m == NULL || m->root == NULL) return 0;
-
-    INode *current = m->root;
-
-    int offset = 0;
-
-    int currIntervalSize = 0;
-
-    while(current != NULL){
-        if(pos < current->low){
-            current = current->left;
-        }
-        else{
-            currIntervalSize = current->high - current->low;
-
-            if(current->opType == -1){
-                offset -= currIntervalSize;
-            }
-            else if(current->opType == 1){
-                offset += currIntervalSize;
-            }
-
-            current = current->right;
-        }
-    }
-
-    return offset;
-}
-
-
-// THIS IS JUST A BRUTE ALGO, TO UPDATE LATER
-static void handleOverlap(MAGIC m, INode *newNode){
-    assert(m != NULL && m->root != NULL && newNode);
-
-    INode *current = m->root;
-    INode *overlapping = NULL;
-
-    while(current != NULL){
-        // Check if overlapping is present
-        if(newNode->low <= current->high && newNode->high >= current->low){
-            overlapping = current;
-
-            // We found an overlapping, we can quit the search
-            break;
-        }
-
-        //Continue the search
-        if(newNode->low < current->low){
-            current = current->left;
-        }
-        else{
-            current = current->right;
-        }
-    }
-    // If there is no overlapping, we insert the new node normally
-    if(!overlapping){
-        rbInsert(m, newNode);
+// PROBLEM HERE maxEnd !!!! (traverse to left subtree)
+/**
+ * @brief Recursive function to traverse the tree and collect operations
+ * @param node Current node in traversal
+ * @param pos Position to check
+ * @param operations Array to store relevant operations
+ * @param count Pointer to the count of collected operations
+ * @param maxOperations Maximum number of operations to collect
+ */
+static void traverse(INode *node, int pos, INode **operations, int *count, int maxOperations) {
+    if (node == NULL || *count >= maxOperations){
         return;
-    }
-
-    // ----------------------- CASES OF OVERLAPPING -----------------------
-
-    // 1) Subsumed (the interval is just included in another, we merge them)
-    if(newNode->low >= overlapping->low && newNode->high <= overlapping->high){
-        overlapping->offset += newNode->offset;
-        free(newNode);
-        return;
-    }
-
-    // 2) Partial overlap (the interval is partially included in another, we split them in 3)
-    if (newNode->low < overlapping->low || newNode->high > overlapping->high) {
-
-        if(newNode->low < overlapping->low){
-            INode *leftNode = createNode(newNode->low, overlapping->low - 1);
-            leftNode->opType = newNode->opType;
-            leftNode->offset = newNode->offset;
-            rbInsert(m, leftNode);
-        }
-
-        if(newNode->high > overlapping->high){
-            INode *rightNode = createNode(overlapping->high + 1, newNode->high);
-            rightNode->opType = newNode->opType;
-            rightNode->offset = newNode->offset;
-            rbInsert(m, rightNode);
-        }
-
-        overlapping->offset += newNode->offset;
-
-        free(newNode);
-        
-        return;
-    }
-
-    // 3) Union of 2 intervals
-    INode *next = nextInterval(m, overlapping);
-    if(next != NULL && newNode->high >= next->low){
-        overlapping->high = (newNode->high > next->high) ? newNode->high : next->high;
-        overlapping->offset += newNode->offset + next->offset;
-        
-        rbRemove(m, next);
-        free(next);
-        free(newNode);
-
-        return;
-    }
-
-}
-
-static INode *nextInterval(MAGIC m, INode *node){
-    assert(m != NULL && node != NULL);
-
-    // If there is a right child, we store the lowest element of it
-    if(node->right != NULL){
-        INode *current = node->right;
-        while(current->left != NULL){
-            current = current->left;
-        }
-        return current;
-    }
-
-
-    // Else: get the first ancestor of left child
-    while(node->parent != NULL){
-        if(node == node->parent->left){
-            return node->parent;
-        }
-        node = node->parent;
     }
     
-    return NULL;
-}
+    // For an operation to be relevant:
+    // - It directly affects the position (pos falls within its range)
+    // - It indirectly affects the position (operation occurs before pos)
+    if ((node->low <= pos && pos < node->high) || // Position falls within range
+        (node->low <= pos)) {                    // Operation occurs before position
+        operations[(*count)++] = node;
+    }
     
+    // Check left subtree 
+    // PROBLEME ICI !!!!!!!
+    if (node->left != NULL && node->left->maxEnd > node->low)
+        traverse(node->left, pos, operations, count, maxOperations);
+    
+    // Check right subtree 
+    if (node->right != NULL && node->low <= pos)
+        traverse(node->right, pos, operations, count, maxOperations);
+}
 
+/**
+ * @brief Collects operations that affect a given position
+ * @param m Pointer to the MAGIC instance
+ * @param pos Position to check
+ * @param operations Array to store relevant operations
+ * @param maxOperations Maximum number of operations to collect
+ * @return Number of operations collected
+ */
+static int collectRelevantOperations(MAGIC m, int pos, INode **operations, int maxOperations) {
+    int count = 0;
+    traverse(m->root, pos, operations, &count, maxOperations);
+    return count;
+}
+
+/**
+ * @brief Compare function for sorting operations by sequence number
+ */
+static int compareBySequence(const void *a, const void *b) {
+    INode *nodeA = *(INode **)a;
+    INode *nodeB = *(INode **)b;
+    return (nodeA->seqNumber - nodeB->seqNumber);
+}
+
+static int inOutMap(INode **operations, int opCount, int pos) {
+    int result = pos;
+    for (int i = 0; i < opCount; i++) {
+        INode *op = operations[i];
+        if (op->opType == 1) { // Add operation
+            if (op->low <= result) {
+                result += (op->high - op->low);
+            }
+        }
+        else { // Remove operation
+            if (op->low <= result) {
+                if (result < op->high)
+                    return -1; // Position falls within removed region
+                result -= (op->high - op->low);
+            }
+        }
+    }
+    return result;
+}
+
+static int outInMap(INode **operations, int opCount, int pos) {
+    int result = pos;
+    
+    // Process operations in reverse order 
+    for (int i = opCount - 1; i >= 0; i--) {
+        INode *op = operations[i];
+        
+        if (op->opType == 1) { // Undo an add operation
+            // If position is within added range, it doesn't exist in input
+            if (op->low <= result && result < op->high)
+                return -1;
+            
+            // If position is after the added range, shift backward
+            if (result >= op->high)
+                result -= (op->high - op->low);
+        }
+        else { // Undo a remove operation
+            // If position is at or after the start of removed section,
+            // shift forward by the length of the removed section
+            if (op->low <= result)
+                result += (op->high - op->low);
+        }
+    }
+    
+    return result;
+}
 
 /* Implementation of API */
 
@@ -481,12 +433,9 @@ void MAGICadd(MAGIC m, int pos, int length){
         return;
 
     newNode->opType = 1; // 1 for add
+    newNode->seqNumber = m->size++; 
 
-    newNode->offset = computeOffset(m, pos);
-    
-    handleOverlap(m, newNode);
-
-    m->size++;
+    rbInsert(m, newNode);
 }
 
 void MAGICremove(MAGIC m, int pos, int length){
@@ -498,57 +447,43 @@ void MAGICremove(MAGIC m, int pos, int length){
         return;
 
     newNode->opType = -1; // -1 for remove
+    newNode->seqNumber = m->size++;
 
-    newNode->offset = computeOffset(m, pos);
-
-    handleOverlap(m, newNode);
-
-    m->size++;
+    rbInsert(m, newNode);
 }
 
-int MAGICmap(MAGIC m, MAGICDirection direction, int pos){
-    assert(m != NULL && (direction == STREAM_IN_OUT || direction == STREAM_OUT_IN));
-
-    INode *current = m->root;
-
-    int offset = 0;
-
-    int currIntervalSize = 0;
-
-    while(current != NULL){
-        if(current->low <= pos && current->high > pos){
-            // If we want to get an interval removed from IN to OUT, it doesn't exist in OUT stream
-            // Or, if we want to get one added from OUT to INT, it doesn't exist in IN stream
-            if((direction == STREAM_IN_OUT && current->opType == -1) ||
-            (direction == STREAM_OUT_IN && current->opType == 1) ){
-                return -1;
-            }
-            // Else: Continue to search
-        }
-
-        if(pos < current->low){
-            current = current->left;
-        }
-        else{
-            currIntervalSize = current->high - current->low;
-
-            // If the interval is removed and we go from IN to OUT, we substract the interval size
-            // If the interval is removed and we go from OUT to IN, we add the interval size
-            if(current->opType == -1){
-                offset += (direction == STREAM_IN_OUT ? -1 : 1) * currIntervalSize;
-            }
-            // If the interval is added and we go from OUT to IN, we add the interval size
-            // If the interval is added and we go from IN to OUT, we substract the interval size
-            else if(current->opType == 1){
-                offset += (direction == STREAM_IN_OUT ? 1 : -1) * currIntervalSize;
-            }
-
-            current = current->right;
-        }
-    }
-
-    return pos + offset;
+int MAGICmap(MAGIC m, MAGICDirection direction, int pos) {
+    if (m == NULL || pos < 0)
+        return -1;
     
+    // 1. Allocate space for operations
+    INode **operations = malloc(m->size * sizeof(INode *));
+    if (operations == NULL){
+        printf("MAGICmap: Allocation Error\n");
+        return -1;
+    }
+        
+    // 2. Collect relevant operations
+    int opCount = collectRelevantOperations(m, pos, operations, m->size);
+    
+    // 3. Sort operations by sequence number
+    qsort(operations, opCount, sizeof(INode *), compareBySequence);
+
+
+    // // test to print operations
+    // for (int i = 0; i < opCount; i++) {
+    //     printf("%d %d %d\n", operations[i]->opType, operations[i]->low, operations[i]->high);
+    // }
+    
+    
+    int result = -1;
+    if (direction == STREAM_IN_OUT)
+        result = inOutMap(operations, opCount, pos);
+    else if (direction == STREAM_OUT_IN)
+        result = outInMap(operations, opCount, pos);
+    
+    free(operations);
+    return result;
 }
 
 void MAGICdestroy(MAGIC m){
@@ -562,3 +497,4 @@ void MAGICdestroy(MAGIC m){
     // Free MAGIC 
     free(m);
 }
+
