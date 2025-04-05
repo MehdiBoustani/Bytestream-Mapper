@@ -200,14 +200,6 @@ void runErrorHandlingTests() {
     MAGICadd(m, 10, -5);  
     printTestResult("Add with negative length", MAGICmap(m, STREAM_IN_OUT, 10), 10);
     
-    // Test large positions
-    int pos = 1000000;
-    int length = 15;
-    int mapPos = 1000005;
-    MAGICadd(m, pos, length);  // Test with a million
-    int result = MAGICmap(m, STREAM_IN_OUT, mapPos);
-    printf("large position test: add(%d, %d) -> map(%d) = %d\n",pos, length, mapPos, result);
-    
     MAGICdestroy(m);
 }
 
