@@ -19,7 +19,8 @@
  * @enum MAGICDirection
  * @brief Enum to define the mapping direction of the byte stream.
  */
-typedef enum {STREAM_IN_OUT = 0, STREAM_OUT_IN = 1} MAGICDirection;
+// typedef enum {STREAM_IN_OUT = 0, STREAM_OUT_IN = 1} MAGICDirection;
+enum MAGICDirection { STREAM_IN_OUT=0, STREAM_OUT_IN=1 };
 
 /**
  * @struct magic
@@ -71,7 +72,7 @@ void MAGICadd(MAGIC m, int pos, int length);
  * 
  * @return Mapped byte position in the given direction
  */
-int MAGICmap(MAGIC m, MAGICDirection direction, int pos);
+int MAGICmap(MAGIC m, enum MAGICDirection direction, int pos);
 
 /**
  * @brief Destroys the MAGIC instance

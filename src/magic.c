@@ -8,12 +8,12 @@
  * 
  * \file magic.c
  * \brief Implementation of MAGIC ADT
- * \author Boustani Mehdi -- Albashityalshaier Abdelkader (Optimized by Claude)
- * \version 1.0
+ * \author Boustani Mehdi -- Albashityalshaier Abdelkader
+ * \version 2.2
  * \date 04/04/2025
  *
  * Implements the MAGIC ADT using an Interval Tree based on a Red-Black Tree
- * Sorted by sequence number with interval metadata for efficient pruning
+ * Sorted by sequence number with interval metadata for pruning
  * 
  */
 
@@ -21,34 +21,107 @@
 typedef struct INode_t INode;
 
 /* Enum for tracking colors */
-typedef enum {RED, BLACK} Color;
+typedef enum {RED=0, BLACK=1} Color;
+
+/* Enum for operation type */
+typedef enum {REMOVE=0, ADD=1} OperationType;
 
 struct INode_t {
-    unsigned int low;      // lower boundary of the interval (pos)
-    unsigned int high;     // high boundary of the interval (pos + length)
-    unsigned int seqNumber;// sequence number for chronological ordering
-    int opType;            // 1 for add, -1 for remove
-    Color color;
+    unsigned int low;  // lower boundary of the interval (pos)
+    unsigned int high;      // high boundary of the interval (pos + length)
+    unsigned int seqNumber;   // sequence number to track chronological order
+    OperationType opType;  // 1 for add, -1 for remove
+
+    unsigned int minSubtree;  // minimum low value in this subtree (for pruning)
+    
+    Color color;  // Color of node in RB tree 
     INode *left, *right, *parent;
 };
 
+/* MAGIC ADT */
 struct magic {
     INode *root;
     size_t size;           // store number of nodes (operations)
 };
 
 /* Prototypes of static functions */
-static INode *createNode(int low, int high, int opType, unsigned int seqNumber);
+static INode *createNode(int low, int high, OperationType OperationType, unsigned int seqNumber);
 static void destroyTree(INode *root);
+static void updateMinSubtree(INode *node);
 static void leftRotate(MAGIC m, INode *x);
 static void rightRotate(MAGIC m, INode *x);
-static void rbInsertFixup(MAGIC m, INode *z);
-static void rbInsert(MAGIC m, INode *z);
-static void inOrderTraversal(INode *root, INode ***operations, int *count);
-static int inOutMap(INode **operations, int opCount, int pos);
-static int outInMap(INode **operations, int opCount, int pos);
+static void rbInsertFixup(MAGIC m, INode *newNode);
+static void rbInsert(MAGIC m, INode *newNode);
+static int mapInOut(INode *node, int pos);
+static int mapOutIn(INode *node, int pos);
 
-/* Static Functions */
+/* Implementation of API */
+
+MAGIC MAGICinit() {
+    MAGIC m = malloc(sizeof(struct magic));
+    if (m == NULL) {
+        printf("MAGICinit: Allocation error\n");
+        return NULL;
+    }
+
+    m->root = NULL;
+    m->size = 0;
+
+    return m;
+}
+
+void MAGICadd(MAGIC m, int pos, int length) {
+    if (m == NULL || length <= 0 || pos < 0)
+        return;
+    // create a new operation node (ADD)
+    INode *newNode = createNode(pos, pos + length, ADD, m->size);
+    if (newNode == NULL)
+        return;
+
+    rbInsert(m, newNode);
+}
+
+void MAGICremove(MAGIC m, int pos, int length) {
+    if (m == NULL || length <= 0 || pos < 0)
+        return;
+
+    // create a new operation node (REMOVE)
+    INode *newNode = createNode(pos, pos + length, REMOVE, m->size);
+    if (newNode == NULL)
+        return;
+
+    rbInsert(m, newNode);
+}
+
+int MAGICmap(MAGIC m, enum MAGICDirection direction, int pos) {
+    if (m == NULL || pos < 0)
+        return -1;
+    
+    if (m->root == NULL) 
+        return pos; // No operations, mapping is identity
+    
+    // Choose mapping function based on direction
+    if (direction == STREAM_IN_OUT) {
+        return mapInOut(m->root, pos);
+    } else { // STREAM_OUT_IN
+        return mapOutIn(m->root, pos);
+    }
+}
+
+void MAGICdestroy(MAGIC m) {
+    if (m == NULL) {
+        return;
+    }
+    
+    // Destroy the tree
+    destroyTree(m->root);
+    
+    // Free MAGIC structure
+    free(m);
+}
+
+
+/* Static Functions Implementation */
 
 /**
  * @brief Create a new Interval Tree node with a given range.
@@ -60,9 +133,9 @@ static int outInMap(INode **operations, int opCount, int pos);
  * 
  * @return INode* a pointer to the new created Interval Node
  */
-static INode *createNode(int low, int high, int opType, unsigned int seqNumber) {
+static INode *createNode(int low, int high, OperationType opType, unsigned int seqNumber) {
     if (low < 0 || high < 0 || low > high) {
-        printf("Invalid interval boundaries\n");
+        printf("createNode: Invalid interval boundaries\n");
         return NULL;
     }
     
@@ -76,10 +149,13 @@ static INode *createNode(int low, int high, int opType, unsigned int seqNumber) 
     n->high = high;
     n->seqNumber = seqNumber;
     n->opType = opType;
-    n->color = RED;     // New nodes are always RED in a Red-Black Tree
+    n->color = RED;     // New nodes are RED by default
     n->parent = NULL;
     n->left = NULL;
     n->right = NULL;
+    
+    // Initialize minSubtree with the node's own low value
+    n->minSubtree = low;
     
     return n;
 }
@@ -103,6 +179,28 @@ static void destroyTree(INode *root) {
 }
 
 /**
+ * @brief Update the minSubtree value for a node based on its low value and children
+ *
+ * @param node Node to update
+ */
+static void updateMinSubtree(INode *node) {
+    if (node == NULL) return;
+    
+    // Ensure default value
+    node->minSubtree = node->low;
+    
+    // See left child's minimum low value
+    if (node->left != NULL && node->left->minSubtree < node->minSubtree) {
+        node->minSubtree = node->left->minSubtree;
+    }
+    
+    // See right child's minimum low value
+    if (node->right != NULL && node->right->minSubtree < node->minSubtree) {
+        node->minSubtree = node->right->minSubtree;
+    }
+}
+
+/**
  * @brief Performs a left rotation at a given node
  *
  * @param m Pointer to the MAGIC instance
@@ -113,7 +211,7 @@ static void leftRotate(MAGIC m, INode *x) {
         return;
     }
     
-    INode *y = x->right;  // Set y
+    INode *y = x->right; // get right child
     
     // Turn y's left subtree into x's right subtree
     x->right = y->left;
@@ -134,6 +232,15 @@ static void leftRotate(MAGIC m, INode *x) {
     // x on y's left
     y->left = x;
     x->parent = y;
+    
+    // Update minSubtree values after rotation
+    updateMinSubtree(x);
+    updateMinSubtree(y);
+    
+    // Update parent minSubtree 
+    if (y->parent != NULL) {
+        updateMinSubtree(y->parent);
+    }
 }
 
 /**
@@ -147,7 +254,7 @@ static void rightRotate(MAGIC m, INode *y) {
         return;
     }
     
-    INode *x = y->left;  // Set x
+    INode *x = y->left;  // get left child
     
     // Turn x's right subtree into y's left subtree
     y->left = x->right;
@@ -168,61 +275,70 @@ static void rightRotate(MAGIC m, INode *y) {
     // y on x's right
     x->right = y;
     y->parent = x;
+    
+    // Update minSubtree values after rotation
+    updateMinSubtree(y);
+    updateMinSubtree(x);
+    
+    // Update parent minSubtree
+    if (x->parent != NULL) {
+        updateMinSubtree(x->parent);
+    }
 }
 
 /**
  * @brief Performs rotations and recoloring to maintain red-black properties after inserting a new node
  *
  * @param m Pointer to the MAGIC instance
- * @param z The newly inserted node
+ * @param newNode The newly inserted node
  */
-static void rbInsertFixup(MAGIC m, INode *z) {
-    if (m == NULL || z == NULL) return;
+static void rbInsertFixup(MAGIC m, INode *newNode) {
+    if (m == NULL || newNode == NULL) return;
 
-    while (z != m->root && z->parent != NULL && z->parent->color == RED) {
-        if (z->parent == z->parent->parent->left) {
+    while (newNode != m->root && newNode->parent != NULL && newNode->parent->color == RED) {
+        if (newNode->parent == newNode->parent->parent->left) {
             // Case: Parent is a left child of grandparent
-            INode *uncle = z->parent->parent->right;
+            INode *uncle = newNode->parent->parent->right;
 
             if (uncle != NULL && uncle->color == RED) {
                 // Case 1: Uncle is RED -> Recolor
-                z->parent->color = BLACK;
+                newNode->parent->color = BLACK;
                 uncle->color = BLACK;
-                z->parent->parent->color = RED;
-                z = z->parent->parent; // Move up to grandparent
+                newNode->parent->parent->color = RED;
+                newNode = newNode->parent->parent; // Move up to grandparent
             } else {
                 // Case 2: Uncle is BLACK (or NULL)
-                if (z == z->parent->right) {
-                    // Case 2a: z is a right child -> Left-rotate parent
-                    z = z->parent;
-                    leftRotate(m, z);
+                if (newNode == newNode->parent->right) {
+                    // Case 2a: newNode is a right child -> Left-rotate parent
+                    newNode = newNode->parent;
+                    leftRotate(m, newNode);
                 }
                 // Case 3: Recolor and right-rotate grandparent
-                z->parent->color = BLACK;
-                z->parent->parent->color = RED;
-                rightRotate(m, z->parent->parent);
+                newNode->parent->color = BLACK;
+                newNode->parent->parent->color = RED;
+                rightRotate(m, newNode->parent->parent);
             }
         } else {
             // Symmetric case: Parent is a right child of grandparent
-            INode *uncle = z->parent->parent->left;
+            INode *uncle = newNode->parent->parent->left;
 
             if (uncle != NULL && uncle->color == RED) {
                 // Case 1: Uncle is RED -> Recolor
-                z->parent->color = BLACK;
+                newNode->parent->color = BLACK;
                 uncle->color = BLACK;
-                z->parent->parent->color = RED;
-                z = z->parent->parent; // Move up to grandparent
+                newNode->parent->parent->color = RED;
+                newNode = newNode->parent->parent; // Move up to grandparent
             } else {
                 // Case 2: Uncle is BLACK (or NULL)
-                if (z == z->parent->left) {
-                    // Case 2a: z is a left child -> Right-rotate parent
-                    z = z->parent;
-                    rightRotate(m, z);
+                if (newNode == newNode->parent->left) {
+                    // Case 2a: newNode is a left child -> Right-rotate parent
+                    newNode = newNode->parent;
+                    rightRotate(m, newNode);
                 }
                 // Case 3: Recolor and left-rotate grandparent
-                z->parent->color = BLACK;
-                z->parent->parent->color = RED;
-                leftRotate(m, z->parent->parent);
+                newNode->parent->color = BLACK;
+                newNode->parent->parent->color = RED;
+                leftRotate(m, newNode->parent->parent);
             }
         }
     }
@@ -236,10 +352,10 @@ static void rbInsertFixup(MAGIC m, INode *z) {
  * @brief Insert a node into the tree (ordered by sequence number)
  *
  * @param m Pointer to the MAGIC instance
- * @param z The new node
+ * @param newNode The new node
  */
-static void rbInsert(MAGIC m, INode *z) {
-    if (m == NULL || z == NULL) return;
+static void rbInsert(MAGIC m, INode *newNode) {
+    if (m == NULL || newNode == NULL) return;
 
     INode *y = NULL;
     INode *x = m->root;
@@ -249,7 +365,7 @@ static void rbInsert(MAGIC m, INode *z) {
         y = x;
         
         // Traverse based on sequence number
-        if (z->seqNumber < x->seqNumber) {
+        if (newNode->seqNumber < x->seqNumber) {
             x = x->left;
         } else {
             x = x->right;
@@ -257,194 +373,152 @@ static void rbInsert(MAGIC m, INode *z) {
     }
 
     // Set parent
-    z->parent = y;
+    newNode->parent = y;
 
     // Insert node
     if (y == NULL) {
         // Tree is empty
-        m->root = z;
-    } else if (z->seqNumber < y->seqNumber) {
-        y->left = z;
+        m->root = newNode;
+    } else if (newNode->seqNumber < y->seqNumber) {
+        y->left = newNode;
     } else {
-        y->right = z;
+        y->right = newNode;
+    }
+    
+    // Update minSubtree for the parent
+    if (y != NULL) {
+        updateMinSubtree(y);
     }
     
     // Fix Red-Black properties
-    rbInsertFixup(m, z);
-}
-
-/**
- * @brief Perform an in-order traversal of the tree to collect operations
- *
- * @param root Root node of the tree
- * @param operations Pointer to array of operations
- * @param count Pointer to count of operations
- */
-static void inOrderTraversal(INode *root, INode ***operations, int *count) {
-    if (root == NULL) return;
+    rbInsertFixup(m, newNode);
     
-    // Traverse left subtree
-    inOrderTraversal(root->left, operations, count);
-    
-    // Process current node
-    (*operations)[(*count)++] = root;
-    
-    // Traverse right subtree
-    inOrderTraversal(root->right, operations, count);
-}
-
-/**
- * @brief Map a position from input stream to output stream
- *
- * @param operations Array of operations in sequence order
- * @param opCount Number of operations
- * @param pos Position to map
- * 
- * @return Mapped position or -1 if invalid
- */
-static int inOutMap(INode **operations, int opCount, int pos) {
-    int result = pos;
-    
-    for (int i = 0; i < opCount; i++) {
-        INode *op = operations[i];
-        
-        if (op->opType == 1) { // Add operation
-            // If position is at or after insertion point, shift it
-            if (op->low <= result) {
-                result += (op->high - op->low);
-            }
-        } else { // Remove operation
-            // Check if position falls within removed region
-            if (op->low <= result && result < op->high) {
-                return -1; // Position was removed, invalid mapping
-            }
-            
-            // If position is after removal point, shift it back
-            if (result >= op->high) {
-                result -= (op->high - op->low);
-            }
-        }
-    }
-    
-    return result;
-}
-
-/**
- * @brief Map a position from output stream to input stream
- *
- * @param operations Array of operations in sequence order
- * @param opCount Number of operations
- * @param pos Position to map
- * 
- * @return Mapped position or -1 if invalid
- */
-static int outInMap(INode **operations, int opCount, int pos) {
-    int result = pos;
-    
-    // Process operations in reverse order
-    for (int i = opCount - 1; i >= 0; i--) {
-        INode *op = operations[i];
-        
-        if (op->opType == 1) { // Undo an add operation
-            // If position is within added range, it doesn't exist in input
-            if (op->low <= result && result < op->high) {
-                return -1;
-            }
-            
-            // If position is after the added range, shift backward
-            if (result >= op->high) {
-                result -= (op->high - op->low);
-            }
-        } else { // Undo a remove operation
-            // If position is at or after the start of removed section,
-            // shift forward by the length of the removed section
-            if (op->low <= result) {
-                result += (op->high - op->low);
-            }
-        }
-    }
-    
-    return result;
-}
-
-/* Implementation of API */
-
-MAGIC MAGICinit() {
-    MAGIC m = malloc(sizeof(struct magic));
-    if (m == NULL) {
-        printf("MAGICinit: Allocation error\n");
-        return NULL;
-    }
-
-    m->root = NULL;
-    m->size = 0;
-
-    return m;
-}
-
-void MAGICadd(MAGIC m, int pos, int length) {
-    if (m == NULL || length <= 0 || pos < 0)
-        return;
-
-    INode *newNode = createNode(pos, pos + length, 1, m->size);
-    if (newNode == NULL)
-        return;
-
-    rbInsert(m, newNode);
     m->size++;
 }
 
-void MAGICremove(MAGIC m, int pos, int length) {
-    if (m == NULL || length <= 0 || pos < 0)
-        return;
-
-    INode *newNode = createNode(pos, pos + length, -1, m->size);
-    if (newNode == NULL)
-        return;
-
-    rbInsert(m, newNode);
-    m->size++;
-}
-
-int MAGICmap(MAGIC m, MAGICDirection direction, int pos) {
-    if (m == NULL || pos < 0)
-        return -1;
+/**
+ * @brief Process operations in order to map position from input to output
+ * With pruning using minSubtree
+ * 
+ * @param node Current node in traversal
+ * @param pos Position to map
+ * @return Mapped position or -1 if invalid (or no mapping)
+ */
+static int mapInOut(INode *node, int pos) {
+    if (node == NULL) {
+        return pos; // Base case: no more operations 
+    }
     
-    if (m->root == NULL) 
-        return pos; // No operations, mapping is identity
-    
-    // 1. Allocate array to store operations
-    INode **operations = malloc(m->size * sizeof(INode *));
-    if (operations == NULL) {
-        printf("MAGICmap: Allocation error\n");
+    // If position is already negative, return answer query to -1
+    if (pos == -1) {
         return -1;
     }
     
-    // 2. Collect operations in sequence order
-    int opCount = 0;
-    inOrderTraversal(m->root, &operations, &opCount);
-    
-    // 3. Map position according to direction
-    int result;
-    if (direction == STREAM_IN_OUT) {
-        result = inOutMap(operations, opCount, pos);
-    } else { // STREAM_OUT_IN
-        result = outInMap(operations, opCount, pos);
+    // Pruning: If position is less than minSubtree of left subtree, 
+    // we can skip the entire left subtree as no operations there will affect this position
+    int leftResult;
+    if (node->left != NULL && pos < node->left->minSubtree) {
+        // Skip left subtree
+        leftResult = pos;
+    } else {
+        // Process left subtree
+        leftResult = mapInOut(node->left, pos);
     }
     
-    // 4. Clean up and return
-    free(operations);
-    return result;
+    // If position has been marked as invalid by the left subtree, propagate it in order to stop traversal
+    if (leftResult == -1) {
+        return -1;
+    }
+    
+    // Apply current operation
+    int cumulativeResult = leftResult; // track cumulative shifts 
+    if (node->opType == ADD) { // Add operation
+        // If position is at or after insertion point, shift it
+        if (node->low <= cumulativeResult) {
+            cumulativeResult += (node->high - node->low);
+        }
+    } else { // Remove operation
+        // Check if position falls within removed region
+        if (node->low <= cumulativeResult && cumulativeResult < node->high) {
+            return -1; // Position was removed, invalid mapping
+        }
+        
+        // If position is after removal point, shift it back
+        else if (cumulativeResult >= node->high) {
+            cumulativeResult -= (node->high - node->low);
+        }
+    }
+    
+    // Pruning: If cumulativeResult is less than minSubtree of right subtree,
+    // we can skip the entire right subtree
+    if (node->right != NULL && cumulativeResult < node->right->minSubtree) {
+        // Skip right subtree
+        return cumulativeResult;
+    } else {
+        // Process right subtree
+        return mapInOut(node->right, cumulativeResult);
+    }
 }
 
-void MAGICdestroy(MAGIC m) {
-    if (m == NULL) {
-        return;
+/**
+ * @brief Process operations in reverse order to map position from output to input
+ * With pruning using minSubtree
+ * 
+ * @param node Current node in traversal
+ * @param pos Position to map
+ * @return Mapped position or -1 if invalid
+ */
+static int mapOutIn(INode *node, int pos) {
+    if (node == NULL) {
+        return pos; // Base case: no more operations
     }
     
-    // Destroy the tree
-    destroyTree(m->root);
+    // If position is already negative, propagate the invalid state
+    if (pos == -1) {
+        return -1;
+    }
     
-    // Free MAGIC structure
-    free(m);
+    // Pruning: Skip right subtree if position is less than the minSubtree of right
+    int rightResult;
+    if (node->right != NULL && pos < node->right->minSubtree) {
+        // Skip right subtree
+        rightResult = pos;
+    } else {
+        // Process right subtree
+        rightResult = mapOutIn(node->right, pos);
+    }
+    
+    // If position has been marked as invalid by the right subtree, propagate it to stop traversal
+    if (rightResult == -1) {
+        return -1;
+    }
+    
+    // Apply current operation (in reverse)
+    int cumulativeResult = rightResult;
+    if (node->opType == ADD) { // Undo an add operation
+        // If position is within added range, it doesn't exist in input
+        if (node->low <= cumulativeResult && cumulativeResult < node->high) {
+            return -1;
+        }
+        
+        // If position is after the added range, shift backward
+        if (cumulativeResult >= node->high) {
+            cumulativeResult -= (node->high - node->low);
+        }
+    } else { // Undo a remove operation
+        // If position is at or after the start of removed section,
+        // shift forward by the length of the removed section
+        if (node->low <= cumulativeResult) {
+            cumulativeResult += (node->high - node->low);
+        }
+    }
+    
+    // Pruning: Skip left subtree if position is less than the minSubtree of left
+    if (node->left != NULL && cumulativeResult < node->left->minSubtree) {
+        // Skip left subtree
+        return cumulativeResult;
+    } else {
+        // Process left subtree
+        return mapOutIn(node->left, cumulativeResult);
+    }
 }
