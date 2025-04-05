@@ -13,7 +13,7 @@
  * \date 04/04/2025
  *
  * Implements the MAGIC ADT using an Interval Tree based on a Red-Black Tree
- * Sorted by sequence number with interval metadata for pruning
+ * Sorted by sequence number with interval metadata (minSubtree) for pruning 
  * 
  */
 
